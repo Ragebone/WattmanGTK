@@ -9,6 +9,7 @@ import signal               # for sigint handling
 import subprocess           # for running lspci
 import os
 import re                   # for getting fancy GPU name
+from optparse import OptionParser
 from pathlib import Path
 
 # Custom classes
@@ -41,6 +42,35 @@ def main():
     # Proper Sigint handling
     # https://bugzilla.gnome.org/show_bug.cgi?id=622084
     signal.signal(signal.SIGINT, signal.SIG_DFL)
+    
+    parser = OptionParser()
+    parser.add_option("-o", "--override", help="override when program fails a check ", metavar="linux/overdrive", type="str")
+    parser.add_option("-p", "--plotpoints", help="number of points to plot", metavar="number", default=25, type="int")
+    parser.add_option("-f", "--frequency", help="frequency in Hz to refresh plot area [1-5]", metavar="number", default=1, type="int")
+    parser.add_option("-r", "--rounding", help="digits to round to in plot", metavar="number", default=2, type="int")
+    (options,_ ) = parser.parse_args()
+    if options.override == "linux":
+        print("Will not stop at linux kernel errors")
+        override_linux = True
+    elif options.override == "overdrive":
+        print("Will not stop if ppfeaturemask has no overdrive")
+        override_overdrive = True
+    else:
+        override_linux = False
+        override_overdrive = False
+    if options.frequency > 5:
+        options.frequency = 5
+    elif options.frequency < 1:
+        options.frequency = 1
+
+    # Check python version
+    (python_major, python_minor, _) = platform.python_version_tuple()
+    if python_major < "3":
+        print("Please run with python3 (3.6+)")
+        exit()
+    elif python_major == "3" and python_minor < "6":
+        print("Please use python version 3.6 and up")
+        exit()
 
     # First check linux version and pp featuremask
 
@@ -63,16 +93,18 @@ def main():
         print ("This means WattmanGTK can not be used.")
         print ("You could force it by flipping the overdrive bit. For this system it would mean to set amdgpu.ppfeaturemask=0x%x" % (featuremask + 0x4000))
         print ("Please refer to: https://github.com/BoukeHaarsma23/WattmanGTK#FAQ on how to set this parameter")
-        exit()
+        if not override_overdrive:
+            exit()
         
     if linux_kernelmain < 4 or (linux_kernelmain >= 4 and linux_kernelsub < 7):
         # kernel 4.8 has percentage od source: https://www.phoronix.com/scan.php?page=news_item&px=AMDGPU-OverDrive-Support
         # kernel 4.17 has all wattman functionality source: https://www.phoronix.com/scan.php?page=news_item&px=AMDGPU-Linux-4.17-Round-1
         print(f"Unsupported kernel ({linux}), make sure you are using linux kernel 4.8 or higher. ")
-        exit()
+        if not override_linux:
+            exit()
 
     # Detect where GPU is located in SYSFS
-    amd_pci_ids = subprocess.check_output("lspci | grep -E \"^.*VGA.*[AMD/ATI].*$\" | grep -Eo \"^([0-9a-fA-F]+:[0-9a-fA-F]+.[0-9a-fA-F])\"", shell=True).decode().split()
+    amd_pci_ids = subprocess.check_output("lspci | grep -E \"^.*(VGA|Display).*\[AMD\/ATI\].*$\" | grep -Eo \"^([0-9a-fA-F]+:[0-9a-fA-F]+.[0-9a-fA-F])\"", shell=True).decode().split()
     print("%s AMD GPU(s) found. Checking if correct kernel driver is used for this/these." % len(amd_pci_ids))
     GPUs = []
     for i, pci_id in enumerate(amd_pci_ids):
@@ -101,6 +133,9 @@ def main():
             print("radeon kernel driver in use for AMD GPU at pci id %s" % pci_id)
             print("You should consider the radeon-profile project to control this card")
             exit()
+        else:
+            print("Something went wrong in detection of your card.")
+            exit()
 
 
     hwmondir = '/sys/class/hwmon/'
@@ -127,12 +162,12 @@ def main():
     window.present()
 
     # Initialise plot
-    maxpoints = 25  # maximum points in plot e.g. last 100 points are plotted
-    precision = 2  # precision used in rounding when calculating mean/average
+    maxpoints = options.plotpoints  # maximum points in plot e.g. last 100 points are plotted
+    precision = options.rounding  # precision used in rounding when calculating mean/average
     Plot0 = Handler0.init_plot(0, maxpoints, precision, linux_kernelmain, linux_kernelsub)
 
     # Start update thread
-    refreshtime = 1  # s , timeout used inbetween updates e.g. 1Hz refreshrate on values/plot
+    refreshtime = 1 / options.frequency  # s , timeout used inbetween updates e.g. 1Hz refreshrate on values/plot
     thread = threading.Thread(target=refresh,args=[refreshtime, Handler0, Plot0])
     thread.daemon = True
     thread.start()

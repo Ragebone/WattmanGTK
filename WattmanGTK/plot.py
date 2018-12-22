@@ -86,21 +86,35 @@ class Plot:
         Plotsignals = []
 
         # Define signals with: names units max min path plotenable plotnormalise plotcolor parser and outputargument used from parser
-        Plotsignals.append(Plotsignal("GPU Clock", "[MHz]", GPU.pstate_clock[-1], GPU.pstate_clock[0],
-                                      "/pp_dpm_sclk", True, True, "#1f77b4",GPU.get_current_clock,0))
-        Plotsignals.append(Plotsignal("GPU State", "[-]", len(GPU.pstate_clock)-1, 0,
-                                      "/pp_dpm_sclk", True, True, "#ff7f0e",GPU.get_current_clock,1))
-        Plotsignals.append(Plotsignal("MEM Clock", "[MHz]", GPU.pmem_clock[-1], GPU.pmem_clock[0],
-                                      "/pp_dpm_mclk", True, True, "#d62728",GPU.get_current_clock,0))
-        Plotsignals.append(Plotsignal("MEM State", "[-]", len(GPU.pmem_clock)-1, 0,
-                                      "/pp_dpm_mclk", True, True, "#9467bd",GPU.get_current_clock,1))
+        if GPU.gpu_clock != 'N/A':
+            Plotsignals.append(Plotsignal("GPU Clock", "[MHz]", GPU.pstate_clock[-1], GPU.pstate_clock[0],
+                                          "/pp_dpm_sclk", True, True, "#1f77b4",GPU.get_current_clock,0))
+            Plotsignals.append(Plotsignal("GPU State", "[-]", len(GPU.pstate_clock)-1, 0,
+                                          "/pp_dpm_sclk", True, True, "#ff7f0e",GPU.get_current_clock,1))
+        if GPU.mem_clock != 'N/A':
+            Plotsignals.append(Plotsignal("MEM Clock", "[MHz]", GPU.pmem_clock[-1], GPU.pmem_clock[0],
+                                          "/pp_dpm_mclk", True, True, "#d62728",GPU.get_current_clock,0))
+            Plotsignals.append(Plotsignal("MEM State", "[-]", len(GPU.pmem_clock)-1, 0,
+                                          "/pp_dpm_mclk", True, True, "#9467bd",GPU.get_current_clock,1))
 
         self.add_available_signal(GPU.sensors, Plotsignals, hwmonpath=GPU.hwmonpath)
 
         # GPU busy percent only properly available in linux version 4.19+
         if (self.linux_kernelmain == 4 and self.linux_kernelsub > 18) or (self.linux_kernelmain >= 5):
             Plotsignals.append(Plotsignal("GPU Usage", "[-]", 100, 0, "/gpu_busy_percent", True, True, "#2ca02c", GPU.read_sensor))
-        return Plotsignals
+        # as final check remove signals that return None:
+        checked_plotlist = []
+        for i, signal in enumerate(Plotsignals):
+             signal.retrieve_data(self.maxpoints)
+             if signal.get_last_value() is not None:
+                 checked_plotlist.append(signal)
+             else:
+                 print(f"Removing {signal.name} from plotsignals, returning Nonetype")
+
+        if len(checked_plotlist) == 0:
+            print("Nothing to plot! Hiding the plot pane.")
+            self.builder.get_object("Plot").hide()
+        return checked_plotlist
 
     def add_available_signal(self, signals, Plotsignals, hwmonpath= "", subsystem = "", stop_recursion = False):
         for key, value in signals.items():
@@ -124,7 +138,7 @@ class Plot:
                         stop_recursion = True
                     if "label" in signals:
                         signallabel = signals["label"]["value"]
-                        if signallabel == "vddgfx":
+                        if signallabel == "vddgfx" and len(self.GPU.volt_range) > 0:
                             signalmax = self.GPU.volt_range[1]
                             signalmin = 0
                         stop_recursion = True
@@ -191,6 +205,8 @@ class Plot:
             self.update_plot()
 
     def update_plot(self):
+        if len(self.Plotsignals) == 0:
+            return
         self.ax.clear()
         for Plotsignal in self.Plotsignals:
             if Plotsignal.plotenable:

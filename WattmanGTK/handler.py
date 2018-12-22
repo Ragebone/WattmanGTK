@@ -212,8 +212,8 @@ class Handler:
     def update_gui(self):
         # Update gui with new GPU values
         self.GPU.get_currents()
-        self.builder.get_object("Current GPU Speed").set_text("Current speed\n %d MHz\n(State: %i)" % (self.GPU.gpu_clock, self.GPU.gpu_state))
-        self.builder.get_object("Current MEM Speed").set_text("Current speed\n %d MHz\n(State: %i)" % (self.GPU.mem_clock,self.GPU.mem_state))
+        self.builder.get_object("Current GPU Speed").set_text(f"Current speed\n {self.GPU.gpu_clock} MHz\n(State: {self.GPU.gpu_state})")
+        self.builder.get_object("Current MEM Speed").set_text(f"Current speed\n {self.GPU.mem_clock} MHz\n(State: {self.GPU.mem_state})")
         self.builder.get_object("Current FAN Speed").set_text(f"Current speed\n {self.GPU.fan_speed} RPM")
         if self.GPU.temperature != 'N/A':
             self.builder.get_object("Current TEMP").set_text("Current temperature\n %.1f °C" % self.GPU.temperature)
@@ -252,10 +252,12 @@ class Handler:
         value = int(slider.get_value())
         if subsystem == "GPU":
             clocks = self.GPU.pstate_clock
-            max_value = self.GPU.pstate_clockrange[1]
+            if self.GPU.pstate:
+                max_value = self.GPU.pstate_clockrange[1]
         elif subsystem == "MEM":
             clocks = self.GPU.pmem_clock
-            max_value = self.GPU.pmem_clockrange[1]
+            if self.GPU.pstate:
+                max_value = self.GPU.pmem_clockrange[1]
         for i, clock in enumerate(clocks):
             current_object = self.builder.get_object(f"{subsystem} P Frequency {i}")
             start_value = clock

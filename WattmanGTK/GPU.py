@@ -46,12 +46,12 @@ class GPU:
         filepath = self.cardpath + "/pp_od_clk_voltage"
         label_pattern = r"^([a-zA-Z_]{1,}):$"
         clock_limit_pattern = r"^(\d|\S{1,}):\s{1,}(\d{1,})(MHz|Mhz|mV)\s{1,}(\d{1,})(MHz|Mhz|mV)$"
+        print("Reading clock states and limits.")
         try:
             with open(filepath) as pp_od_clk_voltage:
                 # File not that large, can put all in memory
                 lines = pp_od_clk_voltage.readlines()
                 lines.append("\n")
-
             readingSCLK = False
             readingMCLK = False
             readingVDDC = False
@@ -107,8 +107,12 @@ class GPU:
                 else:
                     raise FileNotFoundError
 
+            if len(self.pstate_clock + self.pstate_voltage + self.pstate_clockrange + self.pmem_clock + self.pmem_voltage + self.pmem_clockrange + self.volt_range) == 0:
+                raise FileNotFoundError
+
         except FileNotFoundError:
             print("Cannot read file pp_od_clk_voltage, trying using pp_dpm_sclk and pp_dpm_mclk")
+            print("Cannot do seperate overclocking via states, only by percentage!")
             self.pstate = False
             clock_pattern = r"^(\d):\s(\d.*)(Mhz|MHz)\s(\*|)$"
             sclk_filepath = self.cardpath + "/pp_dpm_sclk"
@@ -120,11 +124,18 @@ class GPU:
             with open(sclk_filepath) as origin_file:
                 for i, line in enumerate(origin_file.readlines()):
                     match = re.match(clock_pattern, line)
-                    self.pstate_clock.append(int(match.group(2)))
+                    if match:
+                        self.pstate_clock.append(int(match.group(2)))
             with open(mclk_filepath) as origin_file:
                 for i, line in enumerate(origin_file.readlines()):
                     match = re.match(clock_pattern, line)
-                    self.pmem_clock.append(int(match.group(2)))
+                    if match:
+                        self.pmem_clock.append(int(match.group(2)))
+
+            if len(self.pstate_clock) == 0 or len(self.pmem_clock) == 0:
+                print(f"Also got an error reading {self.cardpath + '/pp_dpm_sclk'} or {self.cardpath + '/pp_dpm_sclk'}")
+                print("WattmanGTK will not be able to continue")
+                exit()
 
         try:
             self.power_cap_max = int(self.sensors['power']['1']['cap']['max']['value'] / 1000000)
@@ -163,6 +174,9 @@ class GPU:
             path = "/" + match.group(0).rstrip()
             print(f"Trying to read {self.hwmonpath + path}")
             value = read(self.hwmonpath + path)
+            if value is None:
+                print(f"Cannot read {self.hwmonpath + path}")
+                continue
             if not subsystem in sensors:
                 sensors.update({subsystem: {}})
             if not sensornumber in sensors[subsystem]:
@@ -200,14 +214,29 @@ class GPU:
                 clock = re.match(r"^(\d):\s(\d.*)Mhz\s\*$", line)
                 if clock:
                     return int(clock.group(2)), int(clock.group(1))
+        return None, None
 
     def get_currents(self):
         # Gets current clocks and utilisation figures for displaying in GUI
-        self.gpu_clock, self.gpu_state = self.get_current_clock("/pp_dpm_sclk")
-        self.gpu_clock_utilisation = self.gpu_clock / self.pstate_clock[-1]
+        gpu_clock, gpu_state = self.get_current_clock("/pp_dpm_sclk")
+        if gpu_clock is not None:
+            self.gpu_clock = gpu_clock
+            self.gpu_state = gpu_state
+            self.gpu_clock_utilisation = self.gpu_clock / self.pstate_clock[-1]
+        else:
+            self.gpu_clock = 'N/A'
+            self.gpu_state = 'N/A'
+            self.gpu_clock_utilisation = 0
 
-        self.mem_clock, self.mem_state = self.get_current_clock("/pp_dpm_mclk")
-        self.mem_utilisation = self.mem_clock / self.pmem_clock[-1]
+        mem_clock, mem_state = self.get_current_clock("/pp_dpm_mclk")
+        if mem_clock is not None:
+            self.mem_clock = mem_clock
+            self.mem_state = mem_state
+            self.mem_utilisation = self.mem_clock / self.pmem_clock[-1]
+        else:
+            self.mem_clock = 'N/A'
+            self.mem_state = 'N/A'
+            self.mem_utilisation = 0
 
         self.update_sensors(self.sensors)
 
